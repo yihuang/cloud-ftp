@@ -1,24 +1,19 @@
-{-# LANGUAGE OverloadedStrings, ViewPatterns #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Network.FTP.Backend.Cloud.Aliyun where
 
 import qualified Prelude as P
 import BasicPrelude
-import Data.Default (def)
-import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as L
-import qualified Data.ByteString.Char8 as S
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
-import Data.Text.Format
+import Data.Text.Format (format, left, Shown(Shown))
 import Data.Time.Format (formatTime)
 import System.Locale (defaultTimeLocale)
 import qualified Network.Aliyun as Ali
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.RWS
-import Network.FTP.Utils (encode)
-import Network.FTP.Backend.Cloud.Types
+import Control.Monad.Trans.RWS (asks)
+import Network.FTP.Backend.Cloud.Types (CloudBackend(..), CloudService(..), CloudConf(aliyunConf))
 
 run :: Ali.Yun a -> CloudBackend a
 run yun = do
@@ -48,37 +43,35 @@ isPlaceholder (Ali.ContentFile file) = Ali.fileKey file == ".placeholder"
 
 aliyunService :: CloudService CloudBackend
 aliyunService =
-    CloudService { listBuckets = listBuckets
-                 , listObjects = listObjects
-                 , putBucket   = putBucket
-                 , getObject   = getObject
-                 , putObject   = putObject
-                 , renameObject = renameObject
-                 , removeObject = removeObject
+    CloudService { listBuckets  = _listBuckets
+                 , listObjects  = _listObjects
+                 , putBucket    = _putBucket
+                 , getObject    = _getObject
+                 , putObject    = _putObject
+                 , renameObject = _renameObject
+                 , removeObject = _removeObject
                  }
   where
-    listBuckets = run $
+    _listBuckets = run $
         map (printBucketContent . uncurry Ali.ContentDirectory) . Ali.bucketList <$> Ali.listService
 
-    listObjects bucket dir = run $
+    _listObjects bucket dir = run $
         Ali.getBucketContents bucket dir
             C.$= C.filter (not . isPlaceholder)
             C.$= C.map printBucketContent
             C.$$ C.consume
 
-    putBucket bucket =
+    _putBucket bucket =
         void $ run $ Ali.putBucket bucket Nothing
 
-    getObject bucket file =
-        lift (run (Ali.getObject bucket (T.encodeUtf8 file))) >>= mapM_ C.yield . LB.toChunks
-    putObject bucket file = do
+    _getObject bucket file =
+        lift (run (Ali.getObject bucket file)) >>= mapM_ C.yield . LB.toChunks
+    _putObject bucket file = do
         lbs <- LB.fromChunks <$> C.consume
-        lift $ run $ Ali.putObjectStr bucket (T.encodeUtf8 file) lbs
-        return ()
-    removeObject bucket file =
-        void $ run $ Ali.deleteObject bucket (T.encodeUtf8 file)
+        void $ lift $ run $ Ali.putObjectStr bucket file lbs
+    _removeObject bucket file =
+        void $ run $ Ali.deleteObject bucket file
 
-    renameObject bucket from to = do
-        run $ Ali.copyObject bucket (T.encodeUtf8 to) (T.encodeUtf8 from)
-        run $ Ali.deleteObject bucket (T.encodeUtf8 from)
-        return ()
+    _renameObject bucket from to = do
+        void $ run $ Ali.copyObject bucket to from
+        void $ run $ Ali.deleteObject bucket from

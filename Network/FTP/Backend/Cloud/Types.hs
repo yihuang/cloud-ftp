@@ -16,12 +16,12 @@ import Network.Aliyun (YunConf)
 
 data CloudService m = CloudService
   { listBuckets :: m [ByteString]
-  , listObjects :: ByteString -> Text -> m [ByteString]
+  , listObjects :: ByteString -> ByteString -> m [ByteString]
   , putBucket   :: ByteString -> m ()
-  , getObject   :: ByteString -> Text -> Source m ByteString
-  , putObject   :: ByteString -> Text -> Sink ByteString m ()
-  , renameObject :: ByteString -> Text -> Text -> m ()
-  , removeObject :: ByteString -> Text -> m ()
+  , getObject   :: ByteString -> ByteString -> Source m ByteString
+  , putObject   :: ByteString -> ByteString -> Sink ByteString m ()
+  , renameObject :: ByteString -> ByteString -> ByteString -> m ()
+  , removeObject :: ByteString -> ByteString -> m ()
   }
 
 emptyCloudService :: CloudService CloudBackend

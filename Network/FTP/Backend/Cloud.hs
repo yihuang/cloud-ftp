@@ -1,6 +1,7 @@
 {-# LANGUAGE OverloadedStrings
            , ViewPatterns
            , TypeFamilies
+           , RecordWildCards
            #-}
 module Network.FTP.Backend.Cloud
   ( CloudConf(..)
@@ -14,28 +15,32 @@ module Network.FTP.Backend.Cloud
 
 import qualified Prelude
 import BasicPrelude
-import System.Directory
 
-import Control.Monad.Trans.RWS
+import Control.Monad.Trans.RWS (modify, gets)
 
+import Filesystem.Path.Internal (FilePath(..))
 import qualified Data.ByteString.Char8 as S
 import Data.Conduit
-import qualified Data.Conduit.List as C
-import qualified Data.Conduit.Binary as C
-import qualified Data.Conduit.Process as C
+import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
-import Network.HTTP.Conduit
 
-import Network.FTP.Utils (dropHeadingPathSeparator, encode, decode)
+import Network.FTP.Utils (encode)
 import Network.FTP.Backend (FTPBackend(..))
 import Network.FTP.Backend.Cloud.Types
 import Network.FTP.Backend.Cloud.Aliyun (aliyunService)
 
-dropHeading :: ByteString -> ByteString
-dropHeading s =
-    case S.uncons s of
-        Just ('/', s') -> s'
-        _         -> s
+-- | remove path root, and split top directory as bucket name, encode the rest of it.
+splitBucket :: FilePath -> Maybe (ByteString, ByteString)
+splitBucket p@FilePath{..} =
+    case pathDirectories of
+        [] -> Nothing
+        (d:ds) -> Just
+              ( T.encodeUtf8 (T.pack d)
+              , encode $
+                  p { pathRoot = Nothing
+                    , pathDirectories = ds
+                    }
+              )
 
 instance FTPBackend CloudBackend where
     type UserId CloudBackend = ByteString
@@ -50,57 +55,46 @@ instance FTPBackend CloudBackend where
             return (Just user)
           else return Nothing
 
-    -- list buckets for root
-    list "/" = do
-        lines <- lift $ withService $ listBuckets
-        yield $ S.intercalate "\n" lines
-
     -- split bucket name and path prefix
-    list (dropHeadingPathSeparator -> path) = do
-        lines <- lift $ withService $ \srv -> listObjects srv bucket (T.decodeUtf8 dir)
-        yield $ S.intercalate "\n" lines
-      where
-        (bucket, dropHeading -> dir) = S.span (/='/') (encode path)
+    list (splitBucket -> Just (bucket, dir)) = do
+        ls <- lift $ withService $ \srv -> listObjects srv bucket dir
+        yield $ S.intercalate "\n" ls
 
-    list _ = fail "only support one level directory."
+    -- root directory is bucket list
+    list _ = do
+        ls <- lift $ withService listBuckets
+        yield $ S.intercalate "\n" ls
 
-    nlst dir =
+    nlst _ =
         return ()
 
-    mkd (dropHeadingPathSeparator -> path) = do
+    mkd (splitBucket -> Just (bucket, dir)) =
         if S.null dir
           -- top directory, create bucket
           then withService $ \srv -> putBucket srv bucket
           -- sub directory, create dir file
-          else withService $ \srv -> yield "" $$ putObject srv bucket (T.decodeUtf8 dir ++ "/.placeholder")
-      where
-        (bucket, dropHeading -> dir) = S.span (/='/') (encode path)
+          else withService $ \srv -> yield "" $$ putObject srv bucket (dir ++ "/.placeholder")
+    mkd _ = fail "Please specify a directory."
 
-    dele (dropHeadingPathSeparator -> path) =
-        withService $ \srv -> removeObject srv bucket (T.decodeUtf8 file)
-      where
-        (bucket, file) = S.span (/='/') (encode path)
+    dele (splitBucket -> Just (bucket, file)) =
+        withService $ \srv -> removeObject srv bucket file
+    dele _ = fail "don't support file in root directory"
 
-    rename fname tname = do
+    rename (splitBucket -> Just (bucket1, file1))
+           (splitBucket -> Just (bucket2, file2)) = do
         when (bucket1/=bucket2) $
-            fail "only support rename within same top directory."
-        withService $ \srv -> renameObject srv bucket1 (T.decodeUtf8 file1) (T.decodeUtf8 file2)
-        return ()
-      where
-        (bucket1, dropHeading -> file1) = S.span (/='/') (encode $ dropHeadingPathSeparator fname)
-        (bucket2, dropHeading -> file2) = S.span (/='/') (encode $ dropHeadingPathSeparator tname)
+            fail "only support rename within same bucket."
+        void $ withService $ \srv -> renameObject srv bucket1 file1 file2
+    rename _ _ = fail "don't support file in root directory"
 
-    rmd dir = do
-        return ()
+    rmd _ = fail "not implemented."
 
-    download (dropHeadingPathSeparator -> path) = do
+    download (splitBucket -> Just (bucket, file)) = do
         srv <- lift $ CloudBackend (gets stService)
-        getObject srv bucket (T.decodeUtf8 file)
-      where
-        (bucket, dropHeading -> file) = S.span (/='/') (encode path)
+        getObject srv bucket file
+    download _ = fail "don't support file in root directory"
 
-    upload   (dropHeadingPathSeparator -> path) = do
+    upload   (splitBucket -> Just (bucket, file)) = do
         srv <- lift $ CloudBackend (gets stService)
-        putObject srv bucket (T.decodeUtf8 file)
-      where
-        (bucket, dropHeading -> file) = S.span (/='/') (encode path)
+        putObject srv bucket file
+    upload _ = fail "don't support file in root directory"
