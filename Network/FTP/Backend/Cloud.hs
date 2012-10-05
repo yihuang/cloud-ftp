@@ -1,7 +1,6 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving
-           , OverloadedStrings
+{-# LANGUAGE OverloadedStrings
+           , ViewPatterns
            , TypeFamilies
-           , MultiParamTypeClasses
            #-}
 module Network.FTP.Backend.Cloud
   ( CloudConf(..)
@@ -16,44 +15,27 @@ module Network.FTP.Backend.Cloud
 import qualified Prelude
 import BasicPrelude
 import System.Directory
-import Filesystem.Path.CurrentOS
 
 import Control.Monad.Trans.RWS
-import Control.Monad.Trans.Control
-import Control.Monad.Base
 
 import qualified Data.ByteString.Char8 as S
 import Data.Conduit
 import qualified Data.Conduit.List as C
 import qualified Data.Conduit.Binary as C
 import qualified Data.Conduit.Process as C
+import qualified Data.Text.Encoding as T
 import Network.HTTP.Conduit
 
+import Network.FTP.Utils (dropHeadingPathSeparator, encode, decode)
 import Network.FTP.Backend (FTPBackend(..))
-import Network.Aliyun
+import Network.FTP.Backend.Cloud.Types
+import Network.FTP.Backend.Cloud.Aliyun (aliyunService)
 
-data CloudConf = CloudConf
-  { httpManager  :: Manager
-  }
-
--- store user related information
-data CloudState = CloudState
-
-newtype CloudBackend a = CloudBackend { unCloudBackend :: RWST CloudConf () CloudState (ResourceT IO) a }
-    deriving ( Functor, Applicative, Monad, MonadIO
-             , MonadUnsafeIO, MonadThrow, MonadResource
-             )
-
-instance MonadBase IO CloudBackend where
-    liftBase = CloudBackend . liftBase
-
-instance MonadBaseControl IO CloudBackend where
-    newtype StM CloudBackend a = CloudBackendStM { unCloudBackendStM :: StM (RWST CloudConf () CloudState (ResourceT IO)) a }
-    liftBaseWith f = CloudBackend . liftBaseWith $ \runInBase -> f $ liftM CloudBackendStM . runInBase . unCloudBackend
-    restoreM = CloudBackend . restoreM . unCloudBackendStM
-
-runCloudBackend :: CloudBackend a -> IO a
-runCloudBackend m = fmap fst $ withManager $ \man -> evalRWST (unCloudBackend m) (CloudConf man) CloudState
+dropHeading :: ByteString -> ByteString
+dropHeading s =
+    case S.uncons s of
+        Just ('/', s') -> s'
+        _         -> s
 
 instance FTPBackend CloudBackend where
     type UserId CloudBackend = ByteString
@@ -62,29 +44,63 @@ instance FTPBackend CloudBackend where
 
     authenticate user pass =
         if user==pass
-          then return (Just user)
+          then do
+            when (user=="aliyun") $
+              CloudBackend $ modify $ \st -> st { stService = aliyunService }
+            return (Just user)
           else return Nothing
 
-    list dir =
-        return ()
+    -- list buckets for root
+    list "/" = do
+        lines <- lift $ withService $ listBuckets
+        yield $ S.intercalate "\n" lines
+
+    -- split bucket name and path prefix
+    list (dropHeadingPathSeparator -> path) = do
+        lines <- lift $ withService $ \srv -> listObjects srv bucket (T.decodeUtf8 dir)
+        yield $ S.intercalate "\n" lines
+      where
+        (bucket, dropHeading -> dir) = S.span (/='/') (encode path)
+
+    list _ = fail "only support one level directory."
 
     nlst dir =
         return ()
 
-    mkd dir =
-        return ()
+    mkd (dropHeadingPathSeparator -> path) = do
+        if S.null dir
+          -- top directory, create bucket
+          then withService $ \srv -> putBucket srv bucket
+          -- sub directory, create dir file
+          else withService $ \srv -> yield "" $$ putObject srv bucket (T.decodeUtf8 dir ++ "/.placeholder")
+      where
+        (bucket, dropHeading -> dir) = S.span (/='/') (encode path)
 
-    dele name =
-        return ()
+    dele (dropHeadingPathSeparator -> path) =
+        withService $ \srv -> removeObject srv bucket (T.decodeUtf8 file)
+      where
+        (bucket, file) = S.span (/='/') (encode path)
 
     rename fname tname = do
+        when (bucket1/=bucket2) $
+            fail "only support rename within same top directory."
+        withService $ \srv -> renameObject srv bucket1 (T.decodeUtf8 file1) (T.decodeUtf8 file2)
         return ()
+      where
+        (bucket1, dropHeading -> file1) = S.span (/='/') (encode $ dropHeadingPathSeparator fname)
+        (bucket2, dropHeading -> file2) = S.span (/='/') (encode $ dropHeadingPathSeparator tname)
 
     rmd dir = do
         return ()
 
-    download name =
-        return ()
+    download (dropHeadingPathSeparator -> path) = do
+        srv <- lift $ CloudBackend (gets stService)
+        getObject srv bucket (T.decodeUtf8 file)
+      where
+        (bucket, dropHeading -> file) = S.span (/='/') (encode path)
 
-    upload   name =
-        return ()
+    upload   (dropHeadingPathSeparator -> path) = do
+        srv <- lift $ CloudBackend (gets stService)
+        putObject srv bucket (T.decodeUtf8 file)
+      where
+        (bucket, dropHeading -> file) = S.span (/='/') (encode path)
