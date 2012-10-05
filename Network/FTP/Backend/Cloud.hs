@@ -33,7 +33,9 @@ import Network.FTP.Backend.Cloud.Aliyun (aliyunService)
 splitBucket :: FilePath -> Maybe (ByteString, ByteString)
 splitBucket p@FilePath{..} =
     case pathDirectories of
-        [] -> Nothing
+        -- 没有路径，则把文件名当唯一的目录
+        [] -> fmap (\p -> (T.encodeUtf8 (T.pack p), ""))
+                   pathBasename
         (d:ds) -> Just
               ( T.encodeUtf8 (T.pack d)
               , encode $
