@@ -1,8 +1,11 @@
-{-# LANGUAGE OverloadedStrings #-}
-import qualified Prelude
+{-# LANGUAGE OverloadedStrings, ViewPatterns #-}
+import qualified Prelude as P
 import BasicPrelude
+import Filesystem.Path.CurrentOS (decodeString)
+import System.Environment (getArgs)
 import qualified Data.Text.Encoding as T
 import qualified Network.Aliyun as Ali
+import Data.Conduit.Network (runTCPServer, serverSettings, HostPreference(HostAny), serverNeedLocalAddr)
 import Network.HTTP.Conduit
 import Network.FTP.Server
 import Network.FTP.Backend.Cloud
@@ -18,6 +21,7 @@ loadConf path = do
     return $ Ali.YunConf "storage.aliyun.com" (T.encodeUtf8 ident) (T.encodeUtf8 key)
 
 main = do
-    aliyunConf <- loadConf "aliyun.conf"
-    let serverConf = ServerSettings 8000 HostAny
+    [P.read -> port, path] <- getArgs
+    aliyunConf <- loadConf (decodeString path)
+    let serverConf = (serverSettings port HostAny){serverNeedLocalAddr=True}
     runCloudBackend (CloudConf aliyunConf) $ runTCPServer serverConf ftpServer
