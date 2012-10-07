@@ -47,9 +47,9 @@ library
   exposed-modules:     Network.FTP.Backend.Cloud
                      , Network.FTP.Backend.Cloud.Aliyun
                      , Network.FTP.Backend.Cloud.Types
-  build-depends:       base ==4.5.*, basic-prelude ==0.3.*, text ==0.11.*, haskell-aliyun ==0.1.*, http-conduit ==1.6.*, haskell-ftp ==0.1.*, transformers ==0.3.*, system-filepath ==0.4.*, bytestring ==0.9.*, conduit ==0.5.*, text-format ==0.3.*, time ==1.4.*, old-locale ==1.0.*, sqlite ==0.5.*, monad-control ==0.3.*, transformers-base ==0.4.*
+  build-depends:       base ==4.5.*, basic-prelude ==0.3.*, text ==0.11.*, haskell-aliyun ==0.1.*, http-conduit ==1.6.*, haskell-ftp ==0.1.*, transformers ==0.3.*, system-filepath ==0.4.*, bytestring ==0.9.*, conduit ==0.5.*, text-format ==0.3.*, time ==1.4.*, old-locale ==1.0.*, sqlite ==0.5.*, monad-control ==0.3.*, transformers-base ==0.4.*, hsini >=0.1.1, unordered-containers >= 0.2, containers >= 0.4
 
 executable cloud-ftp-server
   ghc-options        -Wall -O2
   main-is:           Main.hs
-  build-depends:       base ==4.5.*, basic-prelude ==0.3.*, text ==0.11.*, haskell-aliyun ==0.1.*, network-conduit >=0.6.1, http-conduit ==1.6.*, haskell-ftp ==0.1.*, transformers ==0.3.*, system-filepath ==0.4.*, bytestring ==0.9.*, conduit ==0.5.*, text-format ==0.3.*, time ==1.4.*, old-locale ==1.0.*, sqlite ==0.5.*, monad-control ==0.3.*, transformers-base ==0.4.*
+  build-depends:       base ==4.5.*, basic-prelude ==0.3.*, text ==0.11.*, haskell-aliyun ==0.1.*, network-conduit >=0.6.1, http-conduit ==1.6.*, haskell-ftp ==0.1.*, transformers ==0.3.*, system-filepath ==0.4.*, bytestring ==0.9.*, conduit ==0.5.*, text-format ==0.3.*, time ==1.4.*, old-locale ==1.0.*, sqlite ==0.5.*, monad-control ==0.3.*, transformers-base ==0.4.*, hsini >=0.1.1, unordered-containers >= 0.2, containers >= 0.4

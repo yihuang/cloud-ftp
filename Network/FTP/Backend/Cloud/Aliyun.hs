@@ -13,12 +13,11 @@ import Data.Time.Format (formatTime)
 import System.Locale (defaultTimeLocale)
 import qualified Network.Aliyun as Ali
 import Control.Monad.Trans.RWS (asks)
-import Network.FTP.Backend.Cloud.Types (CloudBackend(..), CloudService(..), CloudConf(aliyunConf))
+import Network.FTP.Backend.Cloud.Types (CloudBackend(..), CloudService(..))
 
-run :: Ali.Yun a -> CloudBackend a
-run yun = do
+run :: Ali.YunConf -> Ali.Yun a -> CloudBackend a
+run conf yun = do
     man <- CloudBackend (asks snd)
-    conf <- CloudBackend (asks (aliyunConf . fst))
     CloudBackend $ lift $ Ali.runYunWithManager man conf yun
 
 printBucketContent :: Ali.BucketContent -> ByteString
@@ -41,8 +40,8 @@ isPlaceholder :: Ali.BucketContent -> Bool
 isPlaceholder (Ali.ContentDirectory _ _) = False
 isPlaceholder (Ali.ContentFile file) = Ali.fileKey file == ".placeholder"
 
-aliyunService :: CloudService CloudBackend
-aliyunService =
+aliyunService :: Ali.YunConf -> CloudService CloudBackend
+aliyunService conf =
     CloudService { listBuckets  = _listBuckets
                  , listObjects  = _listObjects
                  , putBucket    = _putBucket
@@ -52,26 +51,26 @@ aliyunService =
                  , removeObject = _removeObject
                  }
   where
-    _listBuckets = run $
+    _listBuckets = run conf $
         map (printBucketContent . uncurry Ali.ContentDirectory) . Ali.bucketList <$> Ali.listService
 
-    _listObjects bucket dir = run $
+    _listObjects bucket dir = run conf $
         Ali.getBucketContents bucket dir
             C.$= C.filter (not . isPlaceholder)
             C.$= C.map printBucketContent
             C.$$ C.consume
 
     _putBucket bucket =
-        void $ run $ Ali.putBucket bucket Nothing
+        void $ run conf $ Ali.putBucket bucket Nothing
 
     _getObject bucket file =
-        lift (run (Ali.getObject bucket file)) >>= mapM_ C.yield . LB.toChunks
+        lift (run conf (Ali.getObject bucket file)) >>= mapM_ C.yield . LB.toChunks
     _putObject bucket file = do
         lbs <- LB.fromChunks <$> C.consume
-        void $ lift $ run $ Ali.putObjectStr bucket file lbs
+        void $ lift $ run conf $ Ali.putObjectStr bucket file lbs
     _removeObject bucket file =
-        void $ run $ Ali.deleteObject bucket file
+        void $ run conf $ Ali.deleteObject bucket file
 
     _renameObject bucket from to = do
-        void $ run $ Ali.copyObject bucket to from
-        void $ run $ Ali.deleteObject bucket from
+        void $ run conf $ Ali.copyObject bucket to from
+        void $ run conf $ Ali.deleteObject bucket from

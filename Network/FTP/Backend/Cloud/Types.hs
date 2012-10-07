@@ -10,6 +10,7 @@ import BasicPrelude
 import Control.Monad.Trans.RWS
 import Control.Monad.Trans.Control
 import Control.Monad.Base
+import qualified Data.ByteString.Char8 as S
 import Data.Conduit
 import Network.HTTP.Conduit
 import Network.Aliyun (YunConf)
@@ -35,8 +36,17 @@ emptyCloudService =
                , removeObject = \_ _ -> fail "not initialized."
                }
 
+data CloudUser = CloudUser
+  { userName       :: !ByteString
+  , userPass       :: !ByteString
+  , userService    :: !ByteString
+  , userHost       :: !ByteString
+  , userIdentity   :: !ByteString
+  , userKey        :: !ByteString
+  }
+
 data CloudConf = CloudConf
-  { aliyunConf   :: YunConf
+  { cloudUsers :: HashMap ByteString CloudUser
   }
 
 type CloudEnv = (CloudConf, Manager)

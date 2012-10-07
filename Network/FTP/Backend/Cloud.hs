@@ -7,27 +7,50 @@ module Network.FTP.Backend.Cloud
   ( CloudConf(..)
   , CloudBackend(..)
   , runCloudBackend
+  , loadCloudConf
   ) where
 
 {-|
  - Cloud storage based backend.
  -}
 
-import qualified Prelude
+import qualified Prelude as P
 import BasicPrelude
-
-import Control.Monad.Trans.RWS (modify, gets)
-
+import Control.Monad.Trans.RWS (modify, gets, asks)
 import Filesystem.Path.Internal (FilePath(..))
+
+import Data.Maybe (maybeToList)
 import qualified Data.ByteString.Char8 as S
 import Data.Conduit
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as T
+import qualified Data.Map as M
+import qualified Data.HashMap.Strict as HM
+import qualified Data.Ini as Ini
+import qualified Data.Ini.Reader as Ini
 
+import Network.Aliyun (YunConf(YunConf))
 import Network.FTP.Utils (encode)
 import Network.FTP.Backend (FTPBackend(..))
 import Network.FTP.Backend.Cloud.Types
 import Network.FTP.Backend.Cloud.Aliyun (aliyunService)
+
+-- | load configuration from ini file
+loadCloudConf :: String -> IO CloudConf
+loadCloudConf filepath = do
+    content <- P.readFile filepath
+    ini <- either (fail . ("parse failed:"++) . P.show) return $ Ini.parse content
+    let users = HM.fromList $ do
+        (name, section) <- M.toList ini
+        user <- maybeToList $
+            CloudUser (S.pack name)
+                  <$> (S.pack <$> M.lookup "password" section)
+                  <*> (S.pack <$> M.lookup "service" section)
+                  <*> (S.pack <$> M.lookup "host" section)
+                  <*> (S.pack <$> M.lookup "identity" section)
+                  <*> (S.pack <$> M.lookup "key" section)
+        return (userName user, user)
+    return $ CloudConf users
 
 -- | remove path root, and split top directory as bucket name, encode the rest of it.
 splitBucket :: FilePath -> Maybe (ByteString, ByteString)
@@ -49,13 +72,18 @@ instance FTPBackend CloudBackend where
 
     ftplog = liftIO . S.putStrLn
 
-    authenticate user pass =
-        if user==pass
-          then do
-            when (user=="aliyun") $
-              CloudBackend $ modify $ \st -> st { stService = aliyunService }
-            return (Just user)
-          else return Nothing
+    authenticate name pass = do
+        -- lookup user
+        users <- CloudBackend $ asks (cloudUsers . fst)
+        case HM.lookup name users of
+            Nothing -> return Nothing
+            Just u -> do
+                if pass==userPass u
+                  then do
+                    let aliConf = YunConf (userHost u) (userIdentity u) (userKey u)
+                    CloudBackend $ modify $ \st -> st { stService = aliyunService aliConf }
+                    return (Just name)
+                  else return Nothing
 
     -- split bucket name and path prefix
     list (splitBucket -> Just (bucket, dir)) = do
